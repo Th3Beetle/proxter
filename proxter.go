@@ -17,8 +17,6 @@ type Proxter struct {
 	defaultLocalAddr string
 }
 
-var localAddr string = "127.0.0.1:8000"
-
 const (
 	headerDelim = "\r\n\r\n"
 	httpPort    = ":80"
