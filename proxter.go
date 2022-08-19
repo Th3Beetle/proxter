@@ -15,6 +15,10 @@ import (
 type Proxter struct {
 	localAddr        string
 	defaultLocalAddr string
+	Requests         chan string
+	Responses        chan string
+	Control          chan bool
+	ErrorCh          chan error
 }
 
 const (
@@ -24,10 +28,19 @@ const (
 	uriPos      = 1
 )
 
-func New(localAddr string) *Proxter {
+const (
+	Intercept    = true
+	NotIntercept = false
+)
+
+func New(localAddr string, requests chan string, responses chan string, control chan bool, errorCh chan error) *Proxter {
 	return &Proxter{
 		localAddr:        localAddr,
 		defaultLocalAddr: "127.0.0.1:8000",
+		Requests:         requests,
+		Responses:        responses,
+		Control:          control,
+		ErrorCh:          errorCh,
 	}
 }
 
@@ -39,30 +52,35 @@ func (p *Proxter) Start() {
 	for {
 		lconn, err := listener.AcceptTCP()
 		if err != nil {
-			fmt.Println("Failed to accept connection")
+			p.ErrorCh <- err
 			continue
 		}
 
-		requestBytes := readAll(lconn)
+		requestBytes := p.readAll(lconn)
 		request := string(requestBytes)
-		prettyPrint("Request string", request)
 
-		raddr := getRemoteAddr(request)
-		message := prepareRequest(request)
-		prettyPrint("message to send", message)
-		messageBytes := []byte(message)
+		raddr := p.getRemoteAddr(request)
+		requestPrepared := prepareRequest(request)
+		p.Requests <- requestPrepared
+
+		control := <-p.Control
+
+		if control == Intercept {
+			requestPrepared = <-p.Requests
+		}
+
+		preparedBytes := []byte(requestPrepared)
 
 		rconn, err := net.DialTCP("tcp", nil, raddr)
 		if err != nil {
-			fmt.Println("Failed to establish connection to raddr")
+			p.ErrorCh <- err
 			continue
 		}
-		rconn.Write(messageBytes)
+		rconn.Write(preparedBytes)
 
-		response := readAll(rconn)
+		response := p.readAll(rconn)
 		rconn.Close()
-		prettyPrint("response received", string(response))
-
+		p.Responses <- string(response)
 		lconn.Write(response)
 		lconn.Close()
 	}
@@ -88,7 +106,7 @@ func (p *Proxter) getListener() *net.TCPListener {
 	return listener
 }
 
-func getRemoteAddr(request string) *net.TCPAddr {
+func (p *Proxter) getRemoteAddr(request string) *net.TCPAddr {
 	queryString := strings.Split(strings.Fields(request)[1], "/")
 	remoteAddr := queryString[2]
 	if !strings.Contains(remoteAddr, ":") {
@@ -96,27 +114,19 @@ func getRemoteAddr(request string) *net.TCPAddr {
 	}
 	raddr, err := net.ResolveTCPAddr("tcp", remoteAddr)
 	if err != nil {
-		fmt.Println("Failed to resolve remote addr")
+		p.ErrorCh <- err
 	}
 	return raddr
 }
 
-func prepareRequest(request string) string {
-	request = strings.Join(strings.Split(request, "Proxy-Connection: "), "Connection: ")
-	uri := "/" + strings.Join(strings.Split(strings.Fields(request)[1], "/")[uriStart:], "/")
-	requestSplitted := strings.Split(request, " ")
-	requestSplitted[uriPos] = uri
-	return strings.Join(requestSplitted, " ")
-}
-
-func readAll(conn *net.TCPConn) []byte {
+func (p *Proxter) readAll(conn *net.TCPConn) []byte {
 	reader := bufio.NewReader(conn)
-	headers := readHeader(reader)
+	headers := p.readHeader(reader)
 	headersString := string(headers)
 	headers = []byte(headersString)
 	clValue, err := extractContentLength(string(headers))
 	if err != nil {
-		fmt.Println("failed to extract content length")
+		p.ErrorCh <- err
 	}
 	body := make([]byte, clValue)
 	io.ReadFull(reader, body)
@@ -124,12 +134,12 @@ func readAll(conn *net.TCPConn) []byte {
 	return message
 }
 
-func readHeader(reader *bufio.Reader) []byte {
+func (p *Proxter) readHeader(reader *bufio.Reader) []byte {
 	var message []byte
 	for {
 		singleByte, err := reader.ReadByte()
 		if err != nil {
-			fmt.Println("cant read byte")
+			p.ErrorCh <- err
 		}
 		message = append(message, singleByte)
 		if len(message) > 4 && bytes.Equal(message[len(message)-4:], []byte(headerDelim)) {
@@ -154,8 +164,10 @@ func extractContentLength(headers string) (int, error) {
 	return clValue, nil
 }
 
-func prettyPrint(name string, message string) {
-	fmt.Println(name + ": ")
-	fmt.Println(message)
-	fmt.Println("---------------------")
+func prepareRequest(request string) string {
+	request = strings.Join(strings.Split(request, "Proxy-Connection: "), "Connection: ")
+	uri := "/" + strings.Join(strings.Split(strings.Fields(request)[1], "/")[uriStart:], "/")
+	requestSplitted := strings.Split(request, " ")
+	requestSplitted[uriPos] = uri
+	return strings.Join(requestSplitted, " ")
 }
