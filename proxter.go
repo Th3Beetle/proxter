@@ -19,6 +19,8 @@ type Proxter struct {
 	Responses        chan string
 	Control          chan bool
 	ErrorCh          chan error
+	Intercept        bool
+	NotIntercept     bool
 }
 
 const (
@@ -26,11 +28,6 @@ const (
 	httpPort    = ":80"
 	uriStart    = 3
 	uriPos      = 1
-)
-
-const (
-	Intercept    = true
-	NotIntercept = false
 )
 
 func New(localAddr string, requests chan string, responses chan string, control chan bool, errorCh chan error) *Proxter {
@@ -41,6 +38,8 @@ func New(localAddr string, requests chan string, responses chan string, control 
 		Responses:        responses,
 		Control:          control,
 		ErrorCh:          errorCh,
+		Intercept:        true,
+		NotIntercept:     false,
 	}
 }
 
