@@ -19,8 +19,6 @@ type Proxter struct {
 	Responses        chan string
 	Control          chan bool
 	ErrorCh          chan error
-	Intercept        bool
-	NotIntercept     bool
 }
 
 const (
@@ -38,8 +36,6 @@ func New(localAddr string, requests chan string, responses chan string, control 
 		Responses:        responses,
 		Control:          control,
 		ErrorCh:          errorCh,
-		Intercept:        true,
-		NotIntercept:     false,
 	}
 }
 
@@ -64,7 +60,7 @@ func (p *Proxter) Start() {
 
 		control := <-p.Control
 
-		if control == Intercept {
+		if control {
 			requestPrepared = <-p.Requests
 		}
 
