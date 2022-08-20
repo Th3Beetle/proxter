@@ -58,11 +58,7 @@ func (p *Proxter) Start() {
 		requestPrepared := prepareRequest(request)
 		p.Requests <- requestPrepared
 
-		var control bool
-		select {
-		case control = <-p.Control:
-		default:
-		}
+		control := <-p.Control
 
 		if control {
 			requestPrepared = <-p.Requests
