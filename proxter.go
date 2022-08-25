@@ -1,15 +1,13 @@
 package proxter
 
 import (
-	"bufio"
-	"bytes"
 	"fmt"
-	"io"
 	"net"
 	"os"
 	"runtime"
-	"strconv"
 	"strings"
+
+	utils "github.com/Th3Beetle/thutils"
 )
 
 type Proxter struct {
@@ -22,10 +20,9 @@ type Proxter struct {
 }
 
 const (
-	headerDelim = "\r\n\r\n"
-	httpPort    = ":80"
-	uriStart    = 3
-	uriPos      = 1
+	httpPort = ":80"
+	uriStart = 3
+	uriPos   = 1
 )
 
 func New(localAddr string, requests chan string, responses chan string, control chan bool, errorCh chan error) *Proxter {
@@ -51,7 +48,11 @@ func (p *Proxter) Start() {
 			continue
 		}
 
-		requestBytes := p.readAll(lconn)
+		requestBytes, err := utils.ReadAll(lconn)
+		if err != nil {
+			p.ErrorCh <- err
+			continue
+		}
 		request := string(requestBytes)
 
 		raddr := p.getRemoteAddr(request)
@@ -73,7 +74,11 @@ func (p *Proxter) Start() {
 		}
 		rconn.Write(preparedBytes)
 
-		response := p.readAll(rconn)
+		response, err := utils.ReadAll(rconn)
+		if err != nil {
+			p.ErrorCh <- err
+			continue
+		}
 		rconn.Close()
 		p.Responses <- string(response)
 		lconn.Write(response)
@@ -112,51 +117,6 @@ func (p *Proxter) getRemoteAddr(request string) *net.TCPAddr {
 		p.ErrorCh <- err
 	}
 	return raddr
-}
-
-func (p *Proxter) readAll(conn *net.TCPConn) []byte {
-	reader := bufio.NewReader(conn)
-	headers := p.readHeader(reader)
-	headersString := string(headers)
-	headers = []byte(headersString)
-	clValue, err := extractContentLength(string(headers))
-	if err != nil {
-		p.ErrorCh <- err
-	}
-	body := make([]byte, clValue)
-	io.ReadFull(reader, body)
-	message := append(headers, body[:]...)
-	return message
-}
-
-func (p *Proxter) readHeader(reader *bufio.Reader) []byte {
-	var message []byte
-	for {
-		singleByte, err := reader.ReadByte()
-		if err != nil {
-			p.ErrorCh <- err
-		}
-		message = append(message, singleByte)
-		if len(message) > 4 && bytes.Equal(message[len(message)-4:], []byte(headerDelim)) {
-			break
-		}
-	}
-	return message
-
-}
-
-func extractContentLength(headers string) (int, error) {
-	contentLength := strings.Split(headers, "Content-Length: ")
-	var clValue int
-	var err error
-	if len(contentLength) > 1 {
-		valueString := strings.Split(contentLength[1], "\r\n")[0]
-		clValue, err = strconv.Atoi(valueString)
-		if err != nil {
-			return 0, err
-		}
-	}
-	return clValue, nil
 }
 
 func prepareRequest(request string) string {
